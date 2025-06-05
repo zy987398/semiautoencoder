@@ -21,7 +21,8 @@ AUTOENCODER_CONFIG = {
     'learning_rate': 1e-4,
     'weight_decay': 1e-5,
     'scheduler_patience': 20,
-    'scheduler_factor': 0.5
+    'scheduler_factor': 0.5,
+    'kl_weight': 1e-3
 }
 
 # 集成模型配置
