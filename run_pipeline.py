@@ -26,7 +26,8 @@ from utils.visualization import (
 from utils.gpu_optimization import check_gpu_availability, clear_gpu_memory
 from config import (
     AUTOENCODER_CONFIG, ENSEMBLE_CONFIG, SEMI_SUPERVISED_CONFIG,
-    PSEUDO_LABEL_CONFIG, SELF_TRAINING_CONFIG
+    PSEUDO_LABEL_CONFIG, SELF_TRAINING_CONFIG, 
+    OPTIMIZATION_CONFIG, EVALUATION_CONFIG  # 新增导入
 )
 
 
@@ -40,34 +41,31 @@ def run_full_pipeline(X_labeled: np.ndarray,
                      semi_supervised_config: dict = None,
                      pseudo_label_config: dict = None,
                      self_training_config: dict = None,
+                     optimization_config: dict = None,  # 新增参数
                      device: str = None,
                      verbose: bool = True) -> EnhancedSemiSupervisedEnsemble:
     """
     运行完整的半监督学习流程
     
     Args:
-        X_labeled: 标记数据特征
-        y_labeled: 标记数据目标
-        X_unlabeled: 未标记数据特征
-        X_val: 验证集特征（仅真实标记数据）
-        y_val: 验证集目标
-        autoencoder_config: 自编码器配置
-        ensemble_config: 集成模型配置
-        semi_supervised_config: 半监督学习配置
-        pseudo_label_config: 伪标签配置
-        self_training_config: 自训练配置
-        device: 计算设备
-        verbose: 是否打印详细信息
+        ... (原有参数)
+        optimization_config: 优化配置
         
     Returns:
         训练好的模型
     """
-    # 创建模型实例
+    # 获取配置
+    opt_config = optimization_config or OPTIMIZATION_CONFIG
+    ss_config = semi_supervised_config or SEMI_SUPERVISED_CONFIG
+    
+    # 创建模型实例（使用增强功能）
     model = EnhancedSemiSupervisedEnsemble(
         autoencoder_config=autoencoder_config,
         ensemble_config=ensemble_config,
         semi_supervised_config=semi_supervised_config,
-        device=device
+        device=device,
+        use_advanced_pseudo_labeling=ss_config.get('use_advanced_pseudo_labeling', True),
+        use_improved_vae=autoencoder_config.get('use_improved_vae', True) if autoencoder_config else True
     )
     
     # Step 1: 特征工程和自编码器训练
@@ -122,7 +120,13 @@ def main():
                        help='Print detailed information')
     parser.add_argument('--use_gpu', action='store_true', default=True,
                        help='Use GPU if available (default: True)')
-    
+    # 新增参数
+    parser.add_argument('--use_advanced_pseudo_labeling', action='store_true', default=True,
+                       help='Use advanced pseudo labeling strategy')
+    parser.add_argument('--use_improved_vae', action='store_true', default=True,
+                       help='Use improved VAE architecture with attention')
+    parser.add_argument('--disable_gpu_optimization', action='store_true',
+                       help='Disable GPU optimizations')
     args = parser.parse_args()
     
     # 设置设备
@@ -175,9 +179,17 @@ def main():
     print(f"Test set: {len(X_test)} samples")
     print(f"Unlabeled set: {len(X_unlabeled)} samples")
     
+    # 更新配置（如果通过命令行参数指定）
+    if args.use_advanced_pseudo_labeling:
+        SEMI_SUPERVISED_CONFIG['use_advanced_pseudo_labeling'] = True
+    if args.use_improved_vae:
+        AUTOENCODER_CONFIG['use_improved_vae'] = True
+    
     # 运行半监督学习流程
     print("\n" + "="*50)
     print("Running Semi-Supervised Learning Pipeline")
+    print(f"  - Advanced Pseudo Labeling: {SEMI_SUPERVISED_CONFIG.get('use_advanced_pseudo_labeling', True)}")
+    print(f"  - Improved VAE Architecture: {AUTOENCODER_CONFIG.get('use_improved_vae', True)}")
     print("="*50)
     
     model = run_full_pipeline(
@@ -187,7 +199,8 @@ def main():
         X_val=X_val,
         y_val=y_val,
         device=args.device,
-        verbose=args.verbose
+        verbose=args.verbose,
+        optimization_config=OPTIMIZATION_CONFIG  # 传递优化配置
     )
     
     # 评估模型
@@ -277,6 +290,20 @@ def main():
     
     print("Pipeline completed successfully!")
 
+    # 新增：打印高级伪标签生成的详细统计（如果使用）
+    if hasattr(model, 'pseudo_label_generator') and model.pseudo_label_generator:
+        summary = model.pseudo_label_generator.get_iteration_summary()
+        if summary:
+            print("\n=== Advanced Pseudo Label Generation Summary ===")
+            print(f"Total iterations: {summary.get('n_iterations', 0)}")
+            print(f"Total pseudo labels generated: {summary.get('total_pseudo_labels', 0)}")
+            print(f"Mean selection rate: {summary.get('mean_selection_rate', 0):.3f}")
+            
+            # 保存高级统计信息
+            with open(results_dir / 'pseudo_label_summary.json', 'w') as f:
+                json.dump(summary, f, indent=2)
+    
+    print("Pipeline completed successfully!")
 
 if __name__ == "__main__":
     main()
