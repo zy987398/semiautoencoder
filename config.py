@@ -93,10 +93,12 @@ SEMI_SUPERVISED_CONFIG = {
 
 # 伪标签生成配置
 PSEUDO_LABEL_CONFIG = {
-    'confidence_threshold': 0.9,
-    'reconstruction_threshold': 0.9,
-    'ensemble_agreement_threshold': 0.8,
-    'min_pseudo_labels': 50,
+    # 阈值过宽会导致低质量伪标签大量涌入
+    # 调整为更严格的过滤策略
+    'confidence_threshold': 0.4,
+    'reconstruction_threshold': 0.75,
+    'ensemble_agreement_threshold': 0.9,
+    'min_pseudo_labels': 100,
     'iqr_multiplier': 1.5
 }
 

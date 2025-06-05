@@ -108,6 +108,8 @@ class EnhancedSemiSupervisedEnsemble:
     def step2_train_ensemble_with_encoded_features(self,
                                                   X_labeled: np.ndarray,
                                                   y_labeled: np.ndarray,
+                                                  X_val: Optional[np.ndarray] = None,
+                                                  y_val: Optional[np.ndarray] = None,
                                                   verbose: bool = True) -> None:
         """
         步骤2: 使用编码特征训练集成模型
@@ -132,11 +134,19 @@ class EnhancedSemiSupervisedEnsemble:
         X_combined = np.hstack([X_scaled, encoded_features])
         
         # 划分训练验证集
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_combined, y_scaled, 
-            test_size=self.semi_supervised_config['validation_split'], 
-            random_state=SEED
-        )
+        if X_val is None or y_val is None:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_combined, y_scaled,
+                test_size=self.semi_supervised_config['validation_split'],
+                random_state=SEED
+            )
+        else:
+            # 外部提供验证集时，直接使用
+            X_train, y_train = X_combined, y_scaled
+            X_val = self.feature_scaler.transform(self.poly_features.transform(X_val))
+            val_encoded = self.autoencoder_trainer.encode(X_val)
+            X_val = np.hstack([X_val, val_encoded])
+            y_val = self.target_scaler.transform(y_val.reshape(-1, 1)).ravel()
         
         # 初始化集成估计器
         self.ensemble_estimator = EnsembleUncertaintyEstimator(
@@ -275,6 +285,8 @@ class EnhancedSemiSupervisedEnsemble:
                                      X_labeled: np.ndarray,
                                      y_labeled: np.ndarray,
                                      X_unlabeled: np.ndarray,
+                                     X_val: Optional[np.ndarray] = None,
+                                     y_val: Optional[np.ndarray] = None,
                                      self_training_config: Optional[Dict] = None,
                                      pseudo_label_config: Optional[Dict] = None,
                                      verbose: bool = True) -> None:
@@ -285,6 +297,8 @@ class EnhancedSemiSupervisedEnsemble:
             X_labeled: 标记数据特征
             y_labeled: 标记数据目标
             X_unlabeled: 未标记数据特征
+            X_val: 验证集特征（仅真实标记数据）
+            y_val: 验证集目标
             self_training_config: 自训练配置
             pseudo_label_config: 伪标签配置
             verbose: 是否打印信息
@@ -325,7 +339,13 @@ class EnhancedSemiSupervisedEnsemble:
             # 重新训练集成模型
             if verbose:
                 print("Retraining ensemble with expanded dataset...")
-            self.step2_train_ensemble_with_encoded_features(expanded_X, expanded_y, verbose=verbose)
+            self.step2_train_ensemble_with_encoded_features(
+                expanded_X,
+                expanded_y,
+                X_val=X_val,
+                y_val=y_val,
+                verbose=verbose
+            )
             
             # 更新当前标记数据集（选择性地添加高置信度伪标签）
             high_confidence_percentile = st_config.get('high_confidence_percentile', 50)
