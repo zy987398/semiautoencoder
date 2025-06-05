@@ -8,6 +8,7 @@ import json
 import argparse
 import time
 from pathlib import Path
+from typing import Optional
 from sklearn.preprocessing import StandardScaler
 
 # 设置随机种子
@@ -32,6 +33,8 @@ from config import (
 def run_full_pipeline(X_labeled: np.ndarray,
                      y_labeled: np.ndarray,
                      X_unlabeled: np.ndarray,
+                     X_val: Optional[np.ndarray] = None,
+                     y_val: Optional[np.ndarray] = None,
                      autoencoder_config: dict = None,
                      ensemble_config: dict = None,
                      semi_supervised_config: dict = None,
@@ -46,6 +49,8 @@ def run_full_pipeline(X_labeled: np.ndarray,
         X_labeled: 标记数据特征
         y_labeled: 标记数据目标
         X_unlabeled: 未标记数据特征
+        X_val: 验证集特征（仅真实标记数据）
+        y_val: 验证集目标
         autoencoder_config: 自编码器配置
         ensemble_config: 集成模型配置
         semi_supervised_config: 半监督学习配置
@@ -72,12 +77,18 @@ def run_full_pipeline(X_labeled: np.ndarray,
     
     # Step 2: 初始集成模型训练
     model.step2_train_ensemble_with_encoded_features(
-        X_labeled, y_labeled, verbose=verbose
+        X_labeled,
+        y_labeled,
+        X_val=X_val,
+        y_val=y_val,
+        verbose=verbose
     )
     
     # Step 3 & 4: 迭代自训练
     model.step4_iterative_self_training(
         X_labeled, y_labeled, X_unlabeled,
+        X_val=X_val,
+        y_val=y_val,
         self_training_config=self_training_config,
         pseudo_label_config=pseudo_label_config,
         verbose=verbose
@@ -170,7 +181,11 @@ def main():
     print("="*50)
     
     model = run_full_pipeline(
-        X_train, y_train, X_unlabeled,
+        X_train,
+        y_train,
+        X_unlabeled,
+        X_val=X_val,
+        y_val=y_val,
         device=args.device,
         verbose=args.verbose
     )
