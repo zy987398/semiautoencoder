@@ -9,7 +9,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from typing import Tuple, List, Optional, Dict, Any
 import joblib
 
-from models.autoencoder import AutoEncoderTrainer
+from models.vae import VAETrainer
 from models.ensemble import EnsembleUncertaintyEstimator
 from config import (
     SEED, DEVICE, AUTOENCODER_CONFIG, ENSEMBLE_CONFIG,
@@ -71,7 +71,7 @@ class EnhancedSemiSupervisedEnsemble:
             verbose: 是否打印信息
         """
         if verbose:
-            print("=== Step 1: Feature Engineering & AutoEncoder Training ===")
+            print("=== Step 1: Feature Engineering & VAE Training ===")
         
         # 特征工程：多项式特征
         X_labeled_poly = self.poly_features.fit_transform(X_labeled)
@@ -83,11 +83,12 @@ class EnhancedSemiSupervisedEnsemble:
         
         # 初始化和训练自编码器
         input_dim = X_scaled.shape[1]
-        self.autoencoder_trainer = AutoEncoderTrainer(
+        self.autoencoder_trainer = VAETrainer(
             input_dim=input_dim,
             latent_dims=self.autoencoder_config['latent_dims'],
             dropout_rate=self.autoencoder_config['dropout_rate'],
-            device=self.device
+            device=self.device,
+            kl_weight=self.autoencoder_config.get('kl_weight', 1e-3)
         )
         
         # 训练自编码器
@@ -466,11 +467,12 @@ class EnhancedSemiSupervisedEnsemble:
         
         # 重建自编码器
         input_dim = self.poly_features.n_output_features_
-        self.autoencoder_trainer = AutoEncoderTrainer(
+        self.autoencoder_trainer = VAETrainer(
             input_dim=input_dim,
             latent_dims=self.autoencoder_config['latent_dims'],
             dropout_rate=self.autoencoder_config['dropout_rate'],
-            device=self.device
+            device=self.device,
+            kl_weight=self.autoencoder_config.get('kl_weight', 1e-3)
         )
         self.autoencoder_trainer.model.load_state_dict(model_data['autoencoder_state_dict'])
         

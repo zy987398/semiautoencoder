@@ -1,7 +1,7 @@
 # 半监督学习框架 (Semi-Supervised Learning Framework)
 
-这是一个结合深度学习（自编码器）和集成学习的高级半监督学习框架，专门用于处理标记数据有限的回归问题。
-
+这是一个结合深度学习（变分自编码器）和集成学习的高级半监督学习框架，专门用于处理标记
+数据有限的回归问题。
 ## 🚀 GPU加速支持
 
 本框架完全支持GPU加速训练，可以显著提升训练速度。
@@ -52,7 +52,7 @@ semi_supervised_learning/
 ├── config.py              # 配置文件
 ├── models/               # 模型目录
 │   ├── __init__.py
-│   ├── autoencoder.py    # 自编码器模型
+│   ├── vae.py            # 变分自编码器模型
 │   └── ensemble.py       # 集成模型
 ├── core/                 # 核心功能
 │   ├── __init__.py
@@ -69,7 +69,7 @@ semi_supervised_learning/
 
 ## 主要特性
 
-1. **深度特征学习**：使用自编码器从标记和未标记数据中学习有效的特征表示
+1. **深度特征学习**：使用变分自编码器从标记和未标记数据中学习有效的特征表示
 2. **集成学习**：结合多个强大的机器学习模型（LightGBM、XGBoost、CatBoost、NGBoost）
 3. **不确定性估计**：提供预测不确定性的量化估计
 4. **高质量伪标签**：通过多重过滤机制确保伪标签的质量
@@ -160,7 +160,7 @@ model.save_model('my_model.pkl')
 ### 1. 自定义配置
 
 ```python
-# 自定义自编码器配置
+# 自定义VAE配置
 autoencoder_config = {
     'latent_dims': [128, 64, 32],
     'dropout_rate': 0.3,
@@ -193,7 +193,7 @@ model = EnhancedSemiSupervisedEnsemble(
 ### 2. 分步执行
 
 ```python
-# Step 1: 特征工程和自编码器训练
+# Step 1: 特征工程和VAE训练
 model.step1_feature_engineering_and_autoencoder(X_labeled, X_unlabeled)
 
 # Step 2: 训练集成模型
@@ -287,7 +287,7 @@ print(f"Mean Uncertainty: {metrics['uncertainty']['mean_uncertainty']:.4f}")
 ## 故障排除
 
 1. **内存不足**：减少批量大小或使用更少的集成模型
-2. **训练时间过长**：减少自编码器训练轮数或集成模型数量
+2. **训练时间过长**：减少VAE训练轮数或集成模型数量
 3. **伪标签过少**：降低过滤阈值或检查数据质量
 4. **预测性能差**：增加标记数据或调整模型参数
 
@@ -303,7 +303,7 @@ print(f"Mean Uncertainty: {metrics['uncertainty']['mean_uncertainty']:.4f}")
 ## 参考文献
 
 本框架基于以下技术：
-- 自编码器特征学习
+- 变分自编码器特征学习
 - 集成学习
 - 半监督学习
 - 不确定性估计

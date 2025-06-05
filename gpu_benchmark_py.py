@@ -27,12 +27,12 @@ def generate_synthetic_data(n_samples=10000, n_features=50):
 
 
 def benchmark_autoencoder(X, device='cpu', epochs=50):
-    """基准测试自编码器"""
-    from models.autoencoder import AutoEncoderTrainer
-    
-    print(f"\nBenchmarking AutoEncoder on {device.upper()}...")
-    
-    trainer = AutoEncoderTrainer(
+    """基准测试变分自编码器"""
+    from models.vae import VAETrainer
+
+    print(f"\nBenchmarking VAE on {device.upper()}...")
+
+    trainer = VAETrainer(
         input_dim=X.shape[1],
         latent_dims=[32, 16, 8],
         device=device
@@ -262,22 +262,22 @@ def main():
     
     results = {}
     
-    # 1. AutoEncoder基准测试
+    # 1. VAE基准测试
     print("\n" + "="*40)
-    print("AutoEncoder Benchmark")
+    print("VAE Benchmark")
     print("="*40)
-    
-    results['AutoEncoder'] = {}
-    results['AutoEncoder']['cpu'] = benchmark_autoencoder(X, device='cpu', epochs=20)
+
+    results['VAE'] = {}
+    results['VAE']['cpu'] = benchmark_autoencoder(X, device='cpu', epochs=20)
     
     if gpu_available:
         torch.cuda.empty_cache()
-        results['AutoEncoder']['gpu'] = benchmark_autoencoder(X, device='cuda', epochs=20)
-        
-        speedup = results['AutoEncoder']['cpu']['training_time'] / results['AutoEncoder']['gpu']['training_time']
-        print(f"\nAutoEncoder Results:")
-        print(f"  CPU time: {results['AutoEncoder']['cpu']['training_time']:.2f}s")
-        print(f"  GPU time: {results['AutoEncoder']['gpu']['training_time']:.2f}s")
+        results['VAE']['gpu'] = benchmark_autoencoder(X, device='cuda', epochs=20)
+
+        speedup = results['VAE']['cpu']['training_time'] / results['VAE']['gpu']['training_time']
+        print(f"\nVAE Results:")
+        print(f"  CPU time: {results['VAE']['cpu']['training_time']:.2f}s")
+        print(f"  GPU time: {results['VAE']['gpu']['training_time']:.2f}s")
         print(f"  Speedup: {speedup:.2f}x")
     
     # 2. XGBoost基准测试
@@ -347,14 +347,14 @@ def main():
     
     if gpu_available:
         print("\nGPU acceleration provides significant speedup for:")
-        print("- AutoEncoder: Deep learning benefits most from GPU")
+        print("- VAE: Deep learning benefits most from GPU")
         print("- XGBoost: Good GPU support with gpu_hist")
         print("- CatBoost: Excellent GPU optimization")
         print("- LightGBM: GPU support varies by installation")
         
         print("\nRecommendations:")
         print("1. Use GPU for all models when available")
-        print("2. Increase batch size for AutoEncoder on GPU")
+        print("2. Increase batch size for VAE on GPU")
         print("3. Use more estimators/iterations on GPU due to faster training")
     else:
         print("Install CUDA and GPU-enabled packages for acceleration")
