@@ -8,7 +8,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from typing import Tuple, List, Optional, Dict, Any
 import joblib
-
 from models.vae import VAETrainer
 from models.ensemble import EnsembleUncertaintyEstimator
 from config import (
@@ -21,9 +20,16 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import LocalOutlierFactor
 from scipy.stats import entropy
-
 # 导入高级伪标签生成器
 from core.advanced_pseudo_labeling import AdvancedPseudoLabelGenerator
+
+try:
+    from .advanced_pseudo_labeling import AdvancedPseudoLabelGenerator
+    ADVANCED_PSEUDO_LABELING_AVAILABLE = True
+except ImportError:
+    ADVANCED_PSEUDO_LABELING_AVAILABLE = False
+    print("Warning: Advanced pseudo labeling module not found. Using standard method.")
+
 
 class EnhancedSemiSupervisedEnsemble:
     """增强的半监督集成学习框架"""
@@ -51,7 +57,7 @@ class EnhancedSemiSupervisedEnsemble:
         self.device = device or DEVICE
         
         # 新增：配置选项
-        self.use_advanced_pseudo_labeling = use_advanced_pseudo_labeling
+        self.use_advanced_pseudo_labeling = use_advanced_pseudo_labeling and ADVANCED_PSEUDO_LABELING_AVAILABLE
         self.use_improved_vae = use_improved_vae
         
         # 特征处理器
@@ -69,11 +75,16 @@ class EnhancedSemiSupervisedEnsemble:
         
         # 新增：高级伪标签生成器
         if self.use_advanced_pseudo_labeling:
-            self.pseudo_label_generator = AdvancedPseudoLabelGenerator(
-                base_config=PSEUDO_LABEL_CONFIG,
-                use_active_learning=self.semi_supervised_config.get('use_active_learning', True),
-                use_clustering=self.semi_supervised_config.get('use_clustering', True)
-            )
+            try:
+                self.pseudo_label_generator = AdvancedPseudoLabelGenerator(
+                    base_config=PSEUDO_LABEL_CONFIG,
+                    use_active_learning=self.semi_supervised_config.get('use_active_learning', True),
+                    use_clustering=self.semi_supervised_config.get('use_clustering', True)
+                )
+            except Exception as e:
+                print(f"Failed to initialize advanced pseudo label generator: {e}")
+                self.pseudo_label_generator = None
+                self.use_advanced_pseudo_labeling = False
         else:
             self.pseudo_label_generator = None
         
@@ -106,16 +117,30 @@ class EnhancedSemiSupervisedEnsemble:
         
         # 初始化和训练自编码器（使用改进版本）
         input_dim = X_scaled.shape[1]
-        self.autoencoder_trainer = VAETrainer(
-            input_dim=input_dim,
-            latent_dims=self.autoencoder_config['latent_dims'],
-            dropout_rate=self.autoencoder_config['dropout_rate'],
-            device=self.device,
-            kl_weight=self.autoencoder_config.get('kl_weight', 1e-3),
-            use_improved_vae=self.use_improved_vae,  # 使用改进的VAE
-            use_attention=self.autoencoder_config.get('use_attention', True),
-            use_residual=self.autoencoder_config.get('use_residual', True)
-        )
+
+        # 准备VAE配置
+        vae_kwargs = {
+            'input_dim': input_dim,
+            'latent_dims': self.autoencoder_config['latent_dims'],
+            'dropout_rate': self.autoencoder_config['dropout_rate'],
+            'device': self.device,
+            'kl_weight': self.autoencoder_config.get('kl_weight', 1e-3)
+        }
+
+        # 如果VAETrainer支持新参数，则添加
+        try:
+            # 尝试使用新参数
+            self.autoencoder_trainer = VAETrainer(
+                **vae_kwargs,
+                use_improved_vae=self.use_improved_vae,
+                use_attention=self.autoencoder_config.get('use_attention', True),
+                use_residual=self.autoencoder_config.get('use_residual', True)
+            )
+        except TypeError:
+            # 如果新参数不被支持，使用原始方式
+            if verbose:
+                print("Using standard VAE (improved version not available)")
+            self.autoencoder_trainer = VAETrainer(**vae_kwargs)
         
         # 训练自编码器
         history = self.autoencoder_trainer.train(
@@ -207,86 +232,153 @@ class EnhancedSemiSupervisedEnsemble:
             print(f"  - Mean Uncertainty: {np.mean(val_uncertainty):.4f}")
     
     def step3_generate_high_quality_pseudo_labels(self,
-                                                 X_unlabeled: np.ndarray,
-                                                 pseudo_label_config: Optional[Dict] = None,
-                                                 verbose: bool = True,
-                                                 iteration: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                                                X_unlabeled: np.ndarray,
+                                                pseudo_label_config: Optional[Dict] = None,
+                                                verbose: bool = True,
+                                                iteration: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         步骤3: 生成高质量伪标签
         
-        修改：使用高级伪标签生成器或原始方法
+        Args:
+            X_unlabeled: 未标记数据特征
+            pseudo_label_config: 伪标签配置
+            verbose: 是否打印信息
+            iteration: 当前迭代次数（用于自适应阈值）
+            
+        Returns:
+            pseudo_features: 伪标签样本特征
+            pseudo_targets: 伪标签目标值
+            pseudo_uncertainties: 伪标签不确定性
         """
         if verbose:
             print("=== Step 3: Generating High-Quality Pseudo Labels ===")
         
-        # 使用高级伪标签生成器
+        # 使用高级伪标签生成器（如果可用）
         if self.use_advanced_pseudo_labeling and self.pseudo_label_generator:
-            # 定义特征处理函数
-            def feature_processor(X):
-                X_poly = self.poly_features.transform(X)
-                return self.feature_scaler.transform(X_poly)
-            
-            # 使用高级生成器
-            pseudo_features, pseudo_targets_scaled, pseudo_weights, stats = \
-                self.pseudo_label_generator.generate_pseudo_labels(
-                    X_unlabeled=X_unlabeled,
-                    ensemble_estimator=self.ensemble_estimator,
-                    autoencoder_trainer=self.autoencoder_trainer,
-                    feature_processor=feature_processor,
-                    iteration=iteration
-                )
-            
-            # 逆转换目标值
-            pseudo_targets = self.target_scaler.inverse_transform(
-                pseudo_targets_scaled.reshape(-1, 1)
-            ).ravel()
-            
-            # 使用权重作为不确定性的代理（权重越高，不确定性越低）
-            pseudo_uncertainties = 1.0 / (pseudo_weights + 1e-8)
-            
-            # 添加统计信息
-            self.training_history['pseudo_label_stats'].append(stats)
-            
-            if verbose:
-                print(f"Advanced pseudo label generation completed:")
-                print(f"  - Selected samples: {stats['selected_samples']}")
-                print(f"  - Selection rate: {stats['selection_rate']:.3f}")
-                print(f"  - Mean quality score: {stats['mean_quality_score']:.4f}")
-                print(f"  - Mean uncertainty: {stats['mean_uncertainty']:.4f}")
-            
-            return pseudo_features, pseudo_targets, pseudo_uncertainties
+            try:
+                # 定义特征处理函数
+                def feature_processor(X):
+                    X_poly = self.poly_features.transform(X)
+                    return self.feature_scaler.transform(X_poly)
+                
+                # 使用高级生成器
+                pseudo_features, pseudo_targets_scaled, pseudo_weights, stats = \
+                    self.pseudo_label_generator.generate_pseudo_labels(
+                        X_unlabeled=X_unlabeled,
+                        ensemble_estimator=self.ensemble_estimator,
+                        autoencoder_trainer=self.autoencoder_trainer,
+                        feature_processor=feature_processor,
+                        iteration=iteration
+                    )
+                
+                # 逆转换目标值
+                pseudo_targets = self.target_scaler.inverse_transform(
+                    pseudo_targets_scaled.reshape(-1, 1)
+                ).ravel()
+                
+                # 使用权重作为不确定性的代理（权重越高，不确定性越低）
+                pseudo_uncertainties = 1.0 / (pseudo_weights + 1e-8)
+                
+                # 标准化不确定性到合理范围
+                pseudo_uncertainties = pseudo_uncertainties / np.max(pseudo_uncertainties)
+                
+                # 添加统计信息
+                self.training_history['pseudo_label_stats'].append(stats)
+                
+                if verbose:
+                    print(f"Advanced pseudo label generation completed:")
+                    print(f"  - Selected samples: {stats['selected_samples']}")
+                    print(f"  - Selection rate: {stats['selection_rate']:.3f}")
+                    print(f"  - Mean quality score: {stats['mean_quality_score']:.4f}")
+                    print(f"  - Mean uncertainty: {stats['mean_uncertainty']:.4f}")
+                
+                return pseudo_features, pseudo_targets, pseudo_uncertainties
+                
+            except Exception as e:
+                if verbose:
+                    print(f"Advanced pseudo labeling failed: {e}")
+                    print("Falling back to standard method...")
         
-        else:
-            # 使用原始方法
-            return self._original_generate_pseudo_labels(
-                X_unlabeled, pseudo_label_config, verbose
-            )
-    
-    # def _original_generate_pseudo_labels(self,
-    #                                    X_unlabeled: np.ndarray,
-    #                                    pseudo_label_config: Optional[Dict] = None,
-    #                                    verbose: bool = True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    #     """原始的伪标签生成方法（保持向后兼容）"""
-    #     # [原始代码保持不变]
-    #     # 使用提供的配置或默认配置
-    #     config = pseudo_label_config or PSEUDO_LABEL_CONFIG
+        # 使用原始方法（以下是您原始文件中的代码）
+        config = pseudo_label_config or PSEUDO_LABEL_CONFIG
         
-    #     # 特征预处理
-    #     X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
-    #     X_scaled = self.feature_scaler.transform(X_unlabeled_poly)
+        # 特征预处理
+        X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
+        X_scaled = self.feature_scaler.transform(X_unlabeled_poly)
         
-    #     # 获取编码特征和重建误差
-    #     encoded_features, recon_errors = self.autoencoder_trainer.encode_and_get_errors(X_scaled)
+        # 获取编码特征和重建误差
+        encoded_features, recon_errors = self.autoencoder_trainer.encode_and_get_errors(X_scaled)
         
-    #     # 合并特征
-    #     X_combined = np.hstack([X_scaled, encoded_features])
+        # 合并特征
+        X_combined = np.hstack([X_scaled, encoded_features])
         
-    #     # 集成预测
-    #     predictions, uncertainties, individual_preds = self.ensemble_estimator.predict_with_uncertainty(X_combined)
+        # 集成预测
+        predictions, uncertainties, individual_preds = self.ensemble_estimator.predict_with_uncertainty(X_combined)
         
-    #     # [其余原始代码...]
-    #     # 返回结果
-    #     return pseudo_features, pseudo_targets, pseudo_uncertainties
+        # 多重过滤策略
+        filters = {}
+        
+        # 过滤器1: 不确定性过滤
+        uncertainty_threshold = np.percentile(uncertainties, config['confidence_threshold'] * 100)
+        filters['uncertainty'] = uncertainties <= uncertainty_threshold
+        
+        # 过滤器2: 重建误差过滤
+        recon_threshold = np.percentile(recon_errors, config['reconstruction_threshold'] * 100)
+        filters['reconstruction'] = recon_errors <= recon_threshold
+        
+        # 过滤器3: 集成一致性过滤
+        pred_matrix = np.array(list(individual_preds.values())).T
+        pred_std = np.std(pred_matrix, axis=1)
+        pred_mean = np.mean(pred_matrix, axis=1)
+        consistency_scores = 1 - (pred_std / (np.abs(pred_mean) + 1e-8))
+        consistency_threshold = np.percentile(consistency_scores, config['ensemble_agreement_threshold'] * 100)
+        filters['consistency'] = consistency_scores >= consistency_threshold
+        
+        # 过滤器4: 预测范围过滤（避免极端值）
+        pred_q1, pred_q3 = np.percentile(predictions, [25, 75])
+        iqr = pred_q3 - pred_q1
+        iqr_multiplier = config.get('iqr_multiplier', 1.5)
+        lower_bound = pred_q1 - iqr_multiplier * iqr
+        upper_bound = pred_q3 + iqr_multiplier * iqr
+        filters['range'] = (predictions >= lower_bound) & (predictions <= upper_bound)
+        
+        # 合并所有过滤器
+        final_mask = np.ones(len(X_unlabeled), dtype=bool)
+        for filter_name, mask in filters.items():
+            final_mask &= mask
+        
+        # 获取伪标签
+        pseudo_features = X_unlabeled[final_mask]
+        pseudo_targets = self.target_scaler.inverse_transform(predictions[final_mask].reshape(-1, 1)).ravel()
+        pseudo_uncertainties = uncertainties[final_mask]
+        
+        # 统计信息
+        stats = {
+            'total_unlabeled': len(X_unlabeled),
+            'uncertainty_filtered': np.sum(filters['uncertainty']),
+            'reconstruction_filtered': np.sum(filters['reconstruction']),
+            'consistency_filtered': np.sum(filters['consistency']),
+            'range_filtered': np.sum(filters['range']),
+            'final_pseudo_labels': len(pseudo_features),
+            'mean_uncertainty': np.mean(pseudo_uncertainties) if len(pseudo_uncertainties) > 0 else 0,
+            'mean_consistency': np.mean(consistency_scores[final_mask]) if np.sum(final_mask) > 0 else 0,
+            'coverage_ratio': len(pseudo_features) / len(X_unlabeled) if len(X_unlabeled) > 0 else 0
+        }
+        
+        self.training_history['pseudo_label_stats'].append(stats)
+        
+        if verbose:
+            print(f"Pseudo label generation completed:")
+            print(f"  - Original unlabeled samples: {stats['total_unlabeled']}")
+            print(f"  - After uncertainty filter: {stats['uncertainty_filtered']}")
+            print(f"  - After reconstruction filter: {stats['reconstruction_filtered']}")
+            print(f"  - After consistency filter: {stats['consistency_filtered']}")
+            print(f"  - After range filter: {stats['range_filtered']}")
+            print(f"  - Final pseudo labels: {stats['final_pseudo_labels']}")
+            print(f"  - Coverage ratio: {stats['coverage_ratio']:.3f}")
+            print(f"  - Mean uncertainty: {stats['mean_uncertainty']:.4f}")
+        
+        return pseudo_features, pseudo_targets, pseudo_uncertainties
     
     def step4_iterative_self_training(self,
                                      X_labeled: np.ndarray,
@@ -319,7 +411,7 @@ class EnhancedSemiSupervisedEnsemble:
             
             # 生成伪标签（传递迭代次数）
             pseudo_X, pseudo_y, pseudo_uncertainties = self.step3_generate_high_quality_pseudo_labels(
-                current_X_unlabeled, pl_config, verbose=verbose, iteration=iteration
+                current_X_unlabeled, pl_config, verbose=verbose, iteration=iteration  # 添加 iteration
             )
             
             if len(pseudo_X) < pl_config['min_pseudo_labels']:
@@ -475,7 +567,9 @@ class EnhancedSemiSupervisedEnsemble:
             'ensemble_config': self.ensemble_config,
             'semi_supervised_config': self.semi_supervised_config,
             'training_history': self.training_history,
-            'device': self.device
+            'device': self.device,
+            'use_advanced_pseudo_labeling': self.use_advanced_pseudo_labeling,  # 新增
+            'use_improved_vae': self.use_improved_vae,  # 新增
         }
         joblib.dump(model_data, filepath)
         print(f"Model saved to {filepath}")
@@ -489,7 +583,18 @@ class EnhancedSemiSupervisedEnsemble:
         self.ensemble_config = model_data['ensemble_config']
         self.semi_supervised_config = model_data['semi_supervised_config']
         self.device = model_data.get('device', self.device)
-        
+        self.use_advanced_pseudo_labeling = model_data.get('use_advanced_pseudo_labeling', False)
+        self.use_improved_vae = model_data.get('use_improved_vae', False)
+# 如果使用高级伪标签生成，重新初始化生成器
+        if self.use_advanced_pseudo_labeling and ADVANCED_PSEUDO_LABELING_AVAILABLE:
+            try:
+                self.pseudo_label_generator = AdvancedPseudoLabelGenerator(
+                    base_config=PSEUDO_LABEL_CONFIG,
+                    use_active_learning=self.semi_supervised_config.get('use_active_learning', True),
+                    use_clustering=self.semi_supervised_config.get('use_clustering', True)
+                )
+            except:
+                self.pseudo_label_generator = None
         # 加载特征处理器
         self.feature_scaler = model_data['feature_scaler']
         self.target_scaler = model_data['target_scaler']
