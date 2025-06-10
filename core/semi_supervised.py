@@ -582,7 +582,7 @@ class EnhancedSemiSupervisedEnsemble:
         self.device = model_data.get('device', self.device)
         self.use_advanced_pseudo_labeling = model_data.get('use_advanced_pseudo_labeling', False)
         self.use_improved_vae = model_data.get('use_improved_vae', False)
-# 如果使用高级伪标签生成，重新初始化生成器
+        # 如果使用高级伪标签生成，重新初始化生成器
         if self.use_advanced_pseudo_labeling and ADVANCED_PSEUDO_LABELING_AVAILABLE:
             try:
                 self.pseudo_label_generator = AdvancedPseudoLabelGenerator(
