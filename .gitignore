@@ -36,3 +36,5 @@ dist/
 *.pkl
 *.pt
 
+# 忽略 CatBoost 训练中间文件和日志
+catboost_info/
