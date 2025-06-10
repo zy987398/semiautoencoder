@@ -14,9 +14,6 @@ from config import (
     SEED, DEVICE, AUTOENCODER_CONFIG, ENSEMBLE_CONFIG,
     SEMI_SUPERVISED_CONFIG, PSEUDO_LABEL_CONFIG, SELF_TRAINING_CONFIG
 )
-# 在文件开头添加新的导入
-from typing import Tuple, List, Optional, Dict, Any
-import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import LocalOutlierFactor
 from scipy.stats import entropy
@@ -50,12 +47,12 @@ class EnhancedSemiSupervisedEnsemble:
             use_advanced_pseudo_labeling: 是否使用高级伪标签生成
             use_improved_vae: 是否使用改进的VAE架构
         """
-        # 使用提供的配置或默认配置
-        self.autoencoder_config = autoencoder_config or AUTOENCODER_CONFIG
-        self.ensemble_config = ensemble_config or ENSEMBLE_CONFIG
-        self.semi_supervised_config = semi_supervised_config or SEMI_SUPERVISED_CONFIG
-        self.device = device or DEVICE
-        
+        # 优先使用传入的配置文件，其次使用默认配置
+        self.autoencoder_config = AUTOENCODER_CONFIG if autoencoder_config is None else autoencoder_config
+        self.ensemble_config = ENSEMBLE_CONFIG if ensemble_config is None else ensemble_config
+        self.semi_supervised_config = SEMI_SUPERVISED_CONFIG if semi_supervised_config is None else semi_supervised_config
+        self.device = DEVICE if device is None else device
+                
         # 新增：配置选项
         self.use_advanced_pseudo_labeling = use_advanced_pseudo_labeling and ADVANCED_PSEUDO_LABELING_AVAILABLE
         self.use_improved_vae = use_improved_vae
