@@ -1,0 +1,38 @@
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# MacOS
+.DS_Store
+
+# Visual Studio Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Data files
+*.csv
+*.tsv
+*.data
+*.dat
+*.pkl
+*.pt
+
