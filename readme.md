@@ -31,9 +31,9 @@ python check_environment.py
    model = EnhancedSemiSupervisedEnsemble(device='cpu')   # 强制使用CPU
    ```
 
-3. **GPU优化训练示例**：
+3. **GPU性能基准测试**：
    ```bash
-   python gpu_example.py
+   python gpu_benchmark_py.py
    ```
 
 ### GPU性能优化
@@ -47,24 +47,20 @@ python check_environment.py
 ## 项目结构
 
 ```
-semi_supervised_learning/
+semiautoencoder/
 │
 ├── config.py              # 配置文件
-├── models/               # 模型目录
-│   ├── __init__.py
-│   ├── vae.py            # 变分自编码器模型
-│   └── ensemble.py       # 集成模型
-├── core/                 # 核心功能
-│   ├── __init__.py
-│   └── semi_supervised.py # 半监督学习主类
-├── utils/                # 工具函数
-│   ├── __init__.py
-│   ├── data_utils.py     # 数据处理工具
-│   └── visualization.py  # 可视化工具
-├── run_pipeline.py       # 主运行脚本
-├── example_usage.py      # 使用示例
-├── requirements.txt      # 依赖包列表
-└── README.md            # 项目说明
+├── check_environment.py   # 环境检查脚本
+├── install_gpu_deps.py    # GPU依赖安装
+├── gpu_benchmark_py.py    # GPU性能基准测试
+├── run_pipeline.py        # 主运行脚本
+├── test.py                # 简单测试脚本
+├── core/                  # 核心功能
+│   ├── advanced_pseudo_labeling.py
+│   └── semi_supervised.py
+├── models/                # 模型目录
+├── utils/                 # 工具函数
+└── data/                  # 示例数据
 ```
 
 ## 主要特性
@@ -81,7 +77,7 @@ semi_supervised_learning/
 
 ```bash
 git clone <repository-url>
-cd semi_supervised_learning
+cd semiautoencoder
 ```
 
 ### 2. 创建虚拟环境（推荐）
@@ -96,7 +92,9 @@ venv\Scripts\activate  # Windows
 ### 3. 安装依赖
 
 ```bash
-pip install -r requirements.txt
+pip install torch torchvision numpy pandas scikit-learn lightgbm xgboost catboost ngboost matplotlib seaborn joblib
+# 或运行脚本安装GPU依赖
+python install_gpu_deps.py
 ```
 
 ### 4. （可选）安装GPU版本的PyTorch
@@ -248,6 +246,10 @@ print(f"Mean Uncertainty: {metrics['uncertainty']['mean_uncertainty']:.4f}")
 - `--results_dir`: 结果保存目录
 - `--device`: 使用的设备（cuda/cpu）
 - `--verbose`: 打印详细信息
+- `--use_gpu`: 是否使用GPU (默认启用)
+- `--use_advanced_pseudo_labeling`: 启用高级伪标签生成
+- `--use_improved_vae`: 使用改进的VAE架构
+- `--disable_gpu_optimization`: 禁用GPU相关优化
 
 ## 输出结果
 
