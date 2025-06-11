@@ -7,6 +7,8 @@ import pandas as pd
 import torch
 import gc
 import warnings
+import argparse
+
 warnings.filterwarnings('ignore')
 
 # 使用优化的配置
@@ -21,7 +23,21 @@ SAMPLING_CONFIG = {
     'use_gpu': True,                  # 使用GPU
 }
 
+
+def parse_args():
+    """Parse command line options"""
+    parser = argparse.ArgumentParser(
+        description="Balanced semi-supervised learning pipeline")
+    parser.add_argument(
+        '--use_improved_vae', action='store_true',
+        help='Use the improved VAE architecture')
+    parser.add_argument(
+        '--use_advanced_pseudo_labeling', action='store_true',
+        help='Enable advanced pseudo label generation')
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     print("="*60)
     print("BALANCED PIPELINE FOR SUBSURFACE CRACK PREDICTION")
     print("="*60)
@@ -123,6 +139,12 @@ def main():
         torch.cuda.empty_cache()
     else:
         print("\n6. Using CPU")
+
+    # 根据命令行参数更新配置
+    if args.use_improved_vae:
+        AUTOENCODER_CONFIG['use_improved_vae'] = True
+    if args.use_advanced_pseudo_labeling:
+        SEMI_SUPERVISED_CONFIG['use_advanced_pseudo_labeling'] = True
     
     # 7. 运行半监督学习
     print("\n7. Running semi-supervised learning...")
@@ -138,8 +160,8 @@ def main():
         ensemble_config=ENSEMBLE_CONFIG,
         semi_supervised_config=SEMI_SUPERVISED_CONFIG,
         device=device,
-        use_advanced_pseudo_labeling=False,
-        use_improved_vae=False
+        use_advanced_pseudo_labeling=args.use_advanced_pseudo_labeling,
+        use_improved_vae=args.use_improved_vae
     )
     
     # Step 1: VAE训练

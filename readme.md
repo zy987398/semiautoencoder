@@ -251,6 +251,13 @@ print(f"Mean Uncertainty: {metrics['uncertainty']['mean_uncertainty']:.4f}")
 - `--use_improved_vae`: 使用改进的VAE架构
 - `--disable_gpu_optimization`: 禁用GPU相关优化
 
+### Balanced pipeline 额外参数
+
+运行 `python run_pipeline_balanced.py --help` 可查看以下实验选项：
+
+- `--use_improved_vae`: 在平衡管道中启用改进版VAE
+- `--use_advanced_pseudo_labeling`: 在平衡管道中启用高级伪标签生成
+
 ## 输出结果
 
 运行完成后，会在指定的结果目录（默认为 `results/`）生成：
