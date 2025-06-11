@@ -111,7 +111,8 @@ class EnsembleUncertaintyEstimator:
     
     def fit(self, X: np.ndarray, y: np.ndarray,
             eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-            verbose: bool = True) -> 'EnsembleUncertaintyEstimator':
+            verbose: bool = True,
+            sample_weight: Optional[np.ndarray] = None) -> 'EnsembleUncertaintyEstimator':
         """
         使用bagging训练所有模型
 
@@ -119,6 +120,7 @@ class EnsembleUncertaintyEstimator:
             X: 训练特征
             y: 训练目标
             eval_set: 未使用，仅保持接口一致
+            sample_weight: 样本权重，可选
             verbose: 是否打印训练信息
 
         Returns:
@@ -130,6 +132,10 @@ class EnsembleUncertaintyEstimator:
         # 标准化特征
         X_scaled = self.feature_scaler.fit_transform(X)
         n_samples = X_scaled.shape[0]
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight)
+            if len(sample_weight) != n_samples:
+                raise ValueError("Length of sample_weight must match number of samples")
 
         for model_name in self.models.keys():
             config = self.models_config[model_name]
@@ -137,8 +143,15 @@ class EnsembleUncertaintyEstimator:
                 indices = np.random.choice(n_samples, n_samples, replace=True)
                 X_bag = X_scaled[indices]
                 y_bag = y[indices]
+                if sample_weight is not None:
+                    weights_bag = sample_weight[indices]
+                else:
+                    weights_bag = None
                 bag_model = self._create_model(model_name, config)
-                bag_model.fit(X_bag, y_bag)
+                try:
+                    bag_model.fit(X_bag, y_bag, sample_weight=weights_bag)
+                except TypeError:
+                    bag_model.fit(X_bag, y_bag)
                 self.models[model_name].append(bag_model)
             if verbose:
                 print(f"Trained {self.n_bags} {model_name} models")
