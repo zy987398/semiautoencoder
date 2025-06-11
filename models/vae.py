@@ -138,8 +138,8 @@ class ImprovedVariationalAutoEncoder(nn.Module):
         
         self.decoder_layers = nn.ModuleList(decoder_layers)
         
-        # 输出激活
-        self.output_activation = nn.Tanh()
+        # 输出层不再限制到 [-1,1]
+        self.output_activation = nn.Identity()
         
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         h = x
@@ -242,6 +242,12 @@ class VAETrainer:
         self.model.train()
         for epoch in range(epochs):
             epoch_loss = 0.0
+            # KL annealing: gradually increase KL weight after 20 epochs
+            if epoch < 20:
+                kl_w = 0.0
+            else:
+                progress = (epoch - 20) / max(1, (epochs - 20))
+                kl_w = self.kl_weight * progress
             for (batch_x,) in dataloader:
                 batch_x = batch_x.to(self.device)
                 optimizer.zero_grad()
@@ -251,7 +257,7 @@ class VAETrainer:
                         recon, mu, logvar, _ = self.model(batch_x)
                         recon_loss = criterion(recon, batch_x)
                         kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                        loss = recon_loss + self.kl_weight * kl_loss
+                        loss = recon_loss + kl_w * kl_loss
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
@@ -259,7 +265,7 @@ class VAETrainer:
                     recon, mu, logvar, _ = self.model(batch_x)
                     recon_loss = criterion(recon, batch_x)
                     kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                    loss = recon_loss + self.kl_weight * kl_loss
+                    loss = recon_loss + kl_w * kl_loss
                     loss.backward()
                     optimizer.step()
 

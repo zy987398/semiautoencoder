@@ -90,7 +90,7 @@ def test_advanced_pseudo_labeling():
         )
         
         # 生成伪标签
-        pseudo_features, pseudo_targets, pseudo_weights, stats = generator.generate_pseudo_labels(
+        pseudo_features, pseudo_targets, pseudo_weights, unc, stats = generator.generate_pseudo_labels(
             X_unlabeled=X_unlabeled,
             ensemble_estimator=ensemble_estimator,
             autoencoder_trainer=vae_trainer,

@@ -3,6 +3,7 @@
 """
 import numpy as np
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
 from lightgbm import LGBMRegressor
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
@@ -20,7 +21,7 @@ class EnsembleUncertaintyEstimator:
     def __init__(self, models_config: Dict[str, Dict[str, Any]],
                  n_cv_folds: int = 5,
                  use_gpu: bool = True,
-                 bagging_estimators: int = 10):
+                 bagging_estimators: int = 5):
         """
         Args:
             models_config: 模型配置字典
@@ -156,6 +157,17 @@ class EnsembleUncertaintyEstimator:
             if verbose:
                 print(f"Trained {self.n_bags} {model_name} models")
 
+            if eval_set is not None:
+                X_val, y_val = eval_set
+                X_val_scaled = self.feature_scaler.transform(X_val)
+                bag_predictions = np.array([m.predict(X_val_scaled) for m in self.models[model_name]])
+                avg_pred = np.mean(bag_predictions, axis=0)
+                from sklearn.metrics import r2_score
+                r2 = r2_score(y_val, avg_pred)
+                self.model_weights[model_name] = max(r2, 0)
+            else:
+                self.model_weights[model_name] = 1.0
+
         self._is_fitted = True
         return self
     
@@ -193,9 +205,13 @@ class EnsembleUncertaintyEstimator:
 
         all_preds = np.stack(list(individual_preds.values()), axis=0)
         all_uncerts = np.stack(list(uncertainties.values()), axis=0)
+        weights = np.array([self.model_weights.get(name, 1.0) for name in individual_preds.keys()])
+        if weights.sum() == 0:
+            weights = np.ones_like(weights)
+        weights = weights / weights.sum()
 
-        ensemble_pred = np.mean(all_preds, axis=0)
-        ensemble_uncertainty = np.mean(all_uncerts, axis=0)
+        ensemble_pred = np.sum(all_preds * weights[:, None], axis=0)
+        ensemble_uncertainty = np.sum(all_uncerts * weights[:, None], axis=0)
 
         return ensemble_pred, ensemble_uncertainty, individual_preds
     

@@ -3,7 +3,8 @@
 """
 import numpy as np
 import torch
-from sklearn.preprocessing import StandardScaler, RobustScaler, PolynomialFeatures
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from typing import Tuple, List, Optional, Dict, Any
@@ -58,13 +59,19 @@ class EnhancedSemiSupervisedEnsemble:
         self.use_improved_vae = use_improved_vae
         
         # 特征处理器
-        self.feature_scaler = RobustScaler()
+        self.feature_scaler = StandardScaler()
         self.target_scaler = StandardScaler()
-        self.poly_features = PolynomialFeatures(
-            degree=self.semi_supervised_config['poly_degree'],
-            interaction_only=self.semi_supervised_config['poly_interaction_only'],
-            include_bias=self.semi_supervised_config['poly_include_bias']
-        )
+        if self.semi_supervised_config['poly_degree'] > 1:
+            self.poly_features = PolynomialFeatures(
+                degree=self.semi_supervised_config['poly_degree'],
+                interaction_only=self.semi_supervised_config['poly_interaction_only'],
+                include_bias=self.semi_supervised_config['poly_include_bias']
+            )
+        else:
+            self.poly_features = None
+
+        # 降维器用于编码特征
+        self.pca = PCA(n_components=0.95)
         
         # 模型组件
         self.autoencoder_trainer = None
@@ -104,9 +111,13 @@ class EnhancedSemiSupervisedEnsemble:
         if verbose:
             print("=== Step 1: Feature Engineering & VAE Training ===")
         
-        # 特征工程：多项式特征
-        X_labeled_poly = self.poly_features.fit_transform(X_labeled)
-        X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
+        # 特征工程：多项式特征（可选）
+        if self.poly_features is not None:
+            X_labeled_poly = self.poly_features.fit_transform(X_labeled)
+            X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
+        else:
+            X_labeled_poly = X_labeled
+            X_unlabeled_poly = X_unlabeled
         
         # 合并所有特征数据
         X_all = np.vstack([X_labeled_poly, X_unlabeled_poly])
@@ -152,6 +163,10 @@ class EnhancedSemiSupervisedEnsemble:
         )
         
         self.training_history['autoencoder_loss'] = history
+
+        # 使用所有数据的编码特征来拟合PCA，用于后续降维
+        encoded_all = self.autoencoder_trainer.encode(X_scaled)
+        self.pca.fit(encoded_all)
         
     def step2_train_ensemble_with_encoded_features(self,
                                                   X_labeled: np.ndarray,
@@ -173,12 +188,16 @@ class EnhancedSemiSupervisedEnsemble:
             print("=== Step 2: Training Ensemble with Encoded Features ===")
         
         # 特征预处理
-        X_labeled_poly = self.poly_features.transform(X_labeled)
+        if self.poly_features is not None:
+            X_labeled_poly = self.poly_features.transform(X_labeled)
+        else:
+            X_labeled_poly = X_labeled
         X_scaled = self.feature_scaler.transform(X_labeled_poly)
         y_scaled = self.target_scaler.fit_transform(y_labeled.reshape(-1, 1)).ravel()
-        
+
         # 获取编码特征
         encoded_features = self.autoencoder_trainer.encode(X_scaled)
+        encoded_features = self.pca.transform(encoded_features)
         
         # 合并原始特征和编码特征
         X_combined = np.hstack([X_scaled, encoded_features])
@@ -202,9 +221,14 @@ class EnhancedSemiSupervisedEnsemble:
         else:
             # 外部提供验证集时，直接使用
             X_train, y_train = X_combined, y_scaled
-            X_val = self.feature_scaler.transform(self.poly_features.transform(X_val))
-            val_encoded = self.autoencoder_trainer.encode(X_val)
-            X_val = np.hstack([X_val, val_encoded])
+            if self.poly_features is not None:
+                X_val_proc = self.poly_features.transform(X_val)
+            else:
+                X_val_proc = X_val
+            X_val_proc = self.feature_scaler.transform(X_val_proc)
+            val_encoded = self.autoencoder_trainer.encode(X_val_proc)
+            val_encoded = self.pca.transform(val_encoded)
+            X_val = np.hstack([X_val_proc, val_encoded])
             y_val = self.target_scaler.transform(y_val.reshape(-1, 1)).ravel()
             sw_train = sample_weights if sample_weights is not None else None
             sw_val = None
@@ -274,11 +298,14 @@ class EnhancedSemiSupervisedEnsemble:
             try:
                 # 定义特征处理函数
                 def feature_processor(X):
-                    X_poly = self.poly_features.transform(X)
+                    if self.poly_features is not None:
+                        X_poly = self.poly_features.transform(X)
+                    else:
+                        X_poly = X
                     return self.feature_scaler.transform(X_poly)
                 
                 # 使用高级生成器
-                pseudo_features, pseudo_targets_scaled, pseudo_weights, stats = \
+                pseudo_features, pseudo_targets_scaled, pseudo_weights, raw_unc, stats = \
                     self.pseudo_label_generator.generate_pseudo_labels(
                         X_unlabeled=X_unlabeled,
                         ensemble_estimator=self.ensemble_estimator,
@@ -292,11 +319,8 @@ class EnhancedSemiSupervisedEnsemble:
                     pseudo_targets_scaled.reshape(-1, 1)
                 ).ravel()
                 
-                # 使用权重作为不确定性的代理（权重越高，不确定性越低）
-                pseudo_uncertainties = 1.0 / (pseudo_weights + 1e-8)
-                
-                # 标准化不确定性到合理范围
-                pseudo_uncertainties = pseudo_uncertainties / np.max(pseudo_uncertainties)
+                # 使用返回的不确定度
+                pseudo_uncertainties = raw_unc
                 
                 # 添加统计信息
                 self.training_history['pseudo_label_stats'].append(stats)
@@ -319,11 +343,15 @@ class EnhancedSemiSupervisedEnsemble:
         config = pseudo_label_config or PSEUDO_LABEL_CONFIG
         
         # 特征预处理
-        X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
+        if self.poly_features is not None:
+            X_unlabeled_poly = self.poly_features.transform(X_unlabeled)
+        else:
+            X_unlabeled_poly = X_unlabeled
         X_scaled = self.feature_scaler.transform(X_unlabeled_poly)
-        
+
         # 获取编码特征和重建误差
         encoded_features, recon_errors = self.autoencoder_trainer.encode_and_get_errors(X_scaled)
+        encoded_features = self.pca.transform(encoded_features)
         
         # 合并特征
         X_combined = np.hstack([X_scaled, encoded_features])
@@ -362,11 +390,23 @@ class EnhancedSemiSupervisedEnsemble:
         final_mask = np.ones(len(X_unlabeled), dtype=bool)
         for filter_name, mask in filters.items():
             final_mask &= mask
+        selected_indices = np.where(final_mask)[0]
         
         # 获取伪标签
-        pseudo_features = X_unlabeled[final_mask]
-        pseudo_targets = self.target_scaler.inverse_transform(predictions[final_mask].reshape(-1, 1)).ravel()
-        pseudo_uncertainties = uncertainties[final_mask]
+        pseudo_features = X_unlabeled[selected_indices]
+        pseudo_targets_raw = predictions[selected_indices]
+        pseudo_uncertainties = uncertainties[selected_indices]
+
+        # 仅选择最置信的 top-k 样本
+        if len(pseudo_features) > 0:
+            k = int(min(0.3 * len(pseudo_features), 100))
+            if k > 0:
+                idx = np.argsort(pseudo_uncertainties)[:k]
+                pseudo_features = pseudo_features[idx]
+                pseudo_targets_raw = pseudo_targets_raw[idx]
+                pseudo_uncertainties = pseudo_uncertainties[idx]
+
+        pseudo_targets = self.target_scaler.inverse_transform(pseudo_targets_raw.reshape(-1, 1)).ravel()
         
         # 统计信息
         stats = {
@@ -377,7 +417,7 @@ class EnhancedSemiSupervisedEnsemble:
             'range_filtered': np.sum(filters['range']),
             'final_pseudo_labels': len(pseudo_features),
             'mean_uncertainty': np.mean(pseudo_uncertainties) if len(pseudo_uncertainties) > 0 else 0,
-            'mean_consistency': np.mean(consistency_scores[final_mask]) if np.sum(final_mask) > 0 else 0,
+            'mean_consistency': np.mean(consistency_scores[selected_indices]) if len(selected_indices) > 0 else 0,
             'coverage_ratio': len(pseudo_features) / len(X_unlabeled) if len(X_unlabeled) > 0 else 0
         }
         
@@ -419,6 +459,7 @@ class EnhancedSemiSupervisedEnsemble:
         
         current_X_labeled = X_labeled.copy()
         current_y_labeled = y_labeled.copy()
+        current_sample_weights = np.ones(len(current_y_labeled))
         current_X_unlabeled = X_unlabeled.copy()
         
         for iteration in range(st_config['n_iterations']):
@@ -436,20 +477,13 @@ class EnhancedSemiSupervisedEnsemble:
                 break
             
             # 基于不确定性的样本权重
-            pseudo_weights = 1.0 / (1.0 + pseudo_uncertainties)
-            pseudo_weights = pseudo_weights / np.sum(pseudo_weights) * len(pseudo_X)
-            # 迭代衰减
-            decay = st_config.get('sample_weight_decay', 1.0) ** iteration
-            pseudo_weights *= decay
-            
+            pseudo_weights = 0.5 * (1.0 / (1.0 + pseudo_uncertainties))
+            pseudo_weights *= st_config.get('sample_weight_decay', 1.0) ** iteration
+
             # 扩展训练集
             expanded_X = np.vstack([current_X_labeled, pseudo_X])
             expanded_y = np.hstack([current_y_labeled, pseudo_y])
-            if len(current_y_labeled) > 0:
-                labeled_weights = np.ones(len(current_y_labeled))
-                combined_weights = np.hstack([labeled_weights, pseudo_weights])
-            else:
-                combined_weights = pseudo_weights
+            combined_weights = np.hstack([current_sample_weights, pseudo_weights])
             
             # 重新训练集成模型
             if verbose:
@@ -470,6 +504,7 @@ class EnhancedSemiSupervisedEnsemble:
             if np.sum(high_confidence_mask) > 0:
                 current_X_labeled = np.vstack([current_X_labeled, pseudo_X[high_confidence_mask]])
                 current_y_labeled = np.hstack([current_y_labeled, pseudo_y[high_confidence_mask]])
+                current_sample_weights = np.hstack([current_sample_weights, pseudo_weights[high_confidence_mask]])
             
             # 移除已使用的伪标签样本
             if len(current_X_unlabeled) > len(pseudo_X):
@@ -511,11 +546,15 @@ class EnhancedSemiSupervisedEnsemble:
             individual_preds: 各模型预测（如果return_uncertainty=True）
         """
         # 特征预处理
-        X_poly = self.poly_features.transform(X)
+        if self.poly_features is not None:
+            X_poly = self.poly_features.transform(X)
+        else:
+            X_poly = X
         X_scaled = self.feature_scaler.transform(X_poly)
-        
+
         # 获取编码特征
         encoded_features = self.autoencoder_trainer.encode(X_scaled)
+        encoded_features = self.pca.transform(encoded_features)
         
         # 合并特征
         X_combined = np.hstack([X_scaled, encoded_features])

@@ -31,7 +31,7 @@ class AdvancedPseudoLabelGenerator:
                              ensemble_estimator,
                              autoencoder_trainer,
                              feature_processor,
-                             iteration: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
+                             iteration: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict]:
         """
         生成高质量伪标签
         
@@ -39,6 +39,7 @@ class AdvancedPseudoLabelGenerator:
             pseudo_features: 伪标签样本特征
             pseudo_targets: 伪标签目标值
             pseudo_weights: 样本权重
+            uncertainties: 原始不确定度
             stats: 统计信息
         """
         # 特征预处理
@@ -96,9 +97,12 @@ class AdvancedPseudoLabelGenerator:
         
         self.iteration_stats.append(stats)
         
-        return (X_unlabeled[final_mask], 
-                predictions[final_mask], 
+        scaled_unc = uncertainties[final_mask] * 1.5
+
+        return (X_unlabeled[final_mask],
+                predictions[final_mask],
                 sample_weights,
+                scaled_unc,
                 stats)
     
     def _compute_adaptive_thresholds(self, 
@@ -155,13 +159,13 @@ class AdvancedPseudoLabelGenerator:
         lof_scores = (lof_scores + 1) / 2  # 转换到[0, 1]
         
         # 综合评分（可调权重）
-        weights = {
-            'uncertainty': 0.3,
-            'reconstruction': 0.2,
-            'consistency': 0.2,
-            'entropy': 0.15,
-            'density': 0.15
-        }
+        weights = self.config.get('quality_weights', {
+            'uncertainty': 0.5,
+            'reconstruction': 0.25,
+            'consistency': 0.125,
+            'entropy': 0.0625,
+            'density': 0.0625
+        })
         
         quality_scores = (
             weights['uncertainty'] * unc_scores +
@@ -284,20 +288,11 @@ class AdvancedPseudoLabelGenerator:
                               uncertainties: np.ndarray,
                               iteration: int) -> np.ndarray:
         """计算样本权重"""
-        # 基础权重：质量分数
-        base_weights = quality_scores
-        
-        # 不确定性调整
-        uncertainty_weights = 1.0 / (1.0 + uncertainties)
-        
+        # 按相对不确定度计算权重
+        weights = 0.5 * (1.0 / (1.0 + uncertainties))
+
         # 迭代衰减
-        iteration_decay = 0.95 ** iteration
-        
-        # 综合权重
-        weights = base_weights * uncertainty_weights * iteration_decay
-        
-        # 归一化
-        weights = weights / np.sum(weights) * len(weights)
+        weights *= 0.95 ** iteration
         
         return weights
     

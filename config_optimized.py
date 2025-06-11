@@ -16,8 +16,9 @@ if DEVICE == 'cuda':
 
 # 2. VAE配置 - 适应小数据集
 AUTOENCODER_CONFIG = {
-    'latent_dims': [16, 8],      # 减少维度（原本是[64, 32, 16]）
-    'dropout_rate': 0.3,         # 增加dropout
+    # 调整为更高的潜在维度，并减小dropout，侧重特征提取
+    'latent_dims': [64, 32],
+    'dropout_rate': 0.1,
     'epochs': 150,               # 减少epochs
     'batch_size': 64,            # 减小批次
     'learning_rate': 1e-3,
@@ -33,11 +34,12 @@ AUTOENCODER_CONFIG = {
 # 3. 集成配置 - 只使用最高效的模型
 ENSEMBLE_CONFIG = {
     'LightGBM': {
-        'n_estimators': 300,     # 减少（原本是1500）
+        'n_estimators': 150,
         'learning_rate': 0.05,
-        'num_leaves': 31,        # 减少（原本是63）
-        'min_child_samples': 10, # 适应小数据集
-        'reg_alpha': 10,         # 增加正则化
+        'num_leaves': 15,
+        'max_depth': 4,
+        'min_child_samples': 10,
+        'reg_alpha': 10,
         'reg_lambda': 10,
         'subsample': 0.8,
         'colsample_bytree': 0.7,
@@ -45,12 +47,13 @@ ENSEMBLE_CONFIG = {
         'random_state': SEED,
         'verbosity': -1,
         'force_col_wise': True,
-        'num_threads': 4,        # 限制线程数
+        'num_threads': 4,
     },
-    # 注释掉其他模型
-    # 'XGBoost': {...},
-    # 'CatBoost': {...},
-    # 'NGBoost': {...},
+    'NGBoost': {
+        'n_estimators': 400,
+        'learning_rate': 0.01,
+        'random_state': SEED
+    }
 }
 
 # 4. 半监督配置 - 针对数据不平衡
@@ -67,11 +70,19 @@ SEMI_SUPERVISED_CONFIG = {
 
 # 5. 伪标签配置 - 更宽松以获得足够伪标签
 PSEUDO_LABEL_CONFIG = {
-    'confidence_threshold': 0.2,      # 放宽（原本是0.4）
+    # 仅保留不确定度最低的5%样本
+    'confidence_threshold': 0.05,
     'reconstruction_threshold': 0.75,
-    'ensemble_agreement_threshold': 0.85,  # 放宽（原本是0.95）
-    'min_pseudo_labels': 10,          # 减少最小要求
-    'iqr_multiplier': 2.0            # 放宽异常值过滤
+    'ensemble_agreement_threshold': 0.85,
+    'min_pseudo_labels': 10,
+    'iqr_multiplier': 2.0,
+    'quality_weights': {
+        'uncertainty': 0.5,
+        'reconstruction': 0.25,
+        'consistency': 0.125,
+        'entropy': 0.0625,
+        'density': 0.0625
+    }
 }
 
 # 6. 自训练配置 - 减少迭代
