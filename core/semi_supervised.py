@@ -158,6 +158,7 @@ class EnhancedSemiSupervisedEnsemble:
                                                   y_labeled: np.ndarray,
                                                   X_val: Optional[np.ndarray] = None,
                                                   y_val: Optional[np.ndarray] = None,
+                                                  sample_weights: Optional[np.ndarray] = None,
                                                   verbose: bool = True) -> None:
         """
         步骤2: 使用编码特征训练集成模型
@@ -165,6 +166,7 @@ class EnhancedSemiSupervisedEnsemble:
         Args:
             X_labeled: 标记数据特征
             y_labeled: 标记数据目标
+            sample_weights: 样本权重（可选）
             verbose: 是否打印信息
         """
         if verbose:
@@ -183,11 +185,20 @@ class EnhancedSemiSupervisedEnsemble:
         
         # 划分训练验证集
         if X_val is None or y_val is None:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_combined, y_scaled,
-                test_size=self.semi_supervised_config['validation_split'],
-                random_state=SEED
-            )
+            if sample_weights is not None:
+                X_train, X_val, y_train, y_val, sw_train, sw_val = train_test_split(
+                    X_combined, y_scaled, sample_weights,
+                    test_size=self.semi_supervised_config['validation_split'],
+                    random_state=SEED
+                )
+            else:
+                X_train, X_val, y_train, y_val = train_test_split(
+                    X_combined, y_scaled,
+                    test_size=self.semi_supervised_config['validation_split'],
+                    random_state=SEED
+                )
+                sw_train = None
+                sw_val = None
         else:
             # 外部提供验证集时，直接使用
             X_train, y_train = X_combined, y_scaled
@@ -195,6 +206,8 @@ class EnhancedSemiSupervisedEnsemble:
             val_encoded = self.autoencoder_trainer.encode(X_val)
             X_val = np.hstack([X_val, val_encoded])
             y_val = self.target_scaler.transform(y_val.reshape(-1, 1)).ravel()
+            sw_train = sample_weights if sample_weights is not None else None
+            sw_val = None
         
         # 初始化集成估计器
         self.ensemble_estimator = EnsembleUncertaintyEstimator(
@@ -204,7 +217,13 @@ class EnhancedSemiSupervisedEnsemble:
         )
         
         # 训练集成模型
-        self.ensemble_estimator.fit(X_train, y_train, eval_set=(X_val, y_val), verbose=verbose)
+        self.ensemble_estimator.fit(
+            X_train,
+            y_train,
+            eval_set=(X_val, y_val),
+            verbose=verbose,
+            sample_weight=sw_train
+        )
         
         # 评估性能
         val_pred, val_uncertainty, _ = self.ensemble_estimator.predict_with_uncertainty(X_val)
@@ -417,12 +436,20 @@ class EnhancedSemiSupervisedEnsemble:
                 break
             
             # 基于不确定性的样本权重
-            sample_weights = 1.0 / (1.0 + pseudo_uncertainties)
-            sample_weights = sample_weights / np.sum(sample_weights) * len(pseudo_X)
+            pseudo_weights = 1.0 / (1.0 + pseudo_uncertainties)
+            pseudo_weights = pseudo_weights / np.sum(pseudo_weights) * len(pseudo_X)
+            # 迭代衰减
+            decay = st_config.get('sample_weight_decay', 1.0) ** iteration
+            pseudo_weights *= decay
             
             # 扩展训练集
             expanded_X = np.vstack([current_X_labeled, pseudo_X])
             expanded_y = np.hstack([current_y_labeled, pseudo_y])
+            if len(current_y_labeled) > 0:
+                labeled_weights = np.ones(len(current_y_labeled))
+                combined_weights = np.hstack([labeled_weights, pseudo_weights])
+            else:
+                combined_weights = pseudo_weights
             
             # 重新训练集成模型
             if verbose:
@@ -432,6 +459,7 @@ class EnhancedSemiSupervisedEnsemble:
                 expanded_y,
                 X_val=X_val,
                 y_val=y_val,
+                sample_weights=combined_weights,
                 verbose=verbose
             )
             
