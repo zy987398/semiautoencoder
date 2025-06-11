@@ -9,6 +9,7 @@ from catboost import CatBoostRegressor
 from ngboost import NGBRegressor
 from sklearn.ensemble import RandomForestRegressor
 from typing import Dict, Any, Tuple, Optional
+import torch
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -69,8 +70,6 @@ class EnsembleUncertaintyEstimator:
         
     def _check_gpu_support(self):
         """检查并配置GPU支持"""
-        import torch
-        
         self.gpu_available = torch.cuda.is_available() and self.use_gpu
         if self.gpu_available:
             print("GPU is available for ensemble models")
